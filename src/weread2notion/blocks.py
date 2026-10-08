@@ -72,32 +72,40 @@ def get_number(number):
     return {"number": number}
 
 
+def _safe_rich_text(content, max_units=1800):
+    """Preserve long text by splitting it below Notion's 2000-unit limit.
+
+    Count non-BMP characters as two units so emoji cannot exceed the limit.
+    """
+    content = str(content or "")
+    segments = []
+    current = []
+    units = 0
+    for character in content:
+        size = 2 if ord(character) > 0xFFFF else 1
+        if current and units + size > max_units:
+            segments.append("".join(current))
+            current = []
+            units = 0
+        current.append(character)
+        units += size
+    if current or not segments:
+        segments.append("".join(current))
+    return [{"type": "text", "text": {"content": segment}} for segment in segments]
+
+
 def get_quote(content):
     return {
         "type": "quote",
         "quote": {
-            "rich_text": [
-                {
-                    "type": "text",
-                    "text": {"content": content},
-                }
-            ],
+            "rich_text": _safe_rich_text(content),
             "color": "default",
         },
     }
 
 
 def get_callout(content, icon=None):
-    callout = {
-        "rich_text": [
-            {
-                "type": "text",
-                "text": {
-                    "content": content,
-                },
-            }
-        ],
-    }
+    callout = {"rich_text": _safe_rich_text(content)}
     if icon:
         callout["icon"] = {"type": "emoji", "emoji": icon}
     return {
