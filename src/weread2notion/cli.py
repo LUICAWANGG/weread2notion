@@ -267,15 +267,13 @@ def get_review_list(bookId):
     return summary, reviews
 
 
-def check(bookId):
-    """检查是否已经插入过 如果已经插入了就删除"""
+def check(bookId, keep_id=None):
+    """Delete previous copies after the replacement has been fully imported."""
     filter = build_equals_filter("BookId", bookId)
     response = query_data_source(filter=filter)
     for result in response["results"]:
-        try:
+        if result["id"] != keep_id:
             client.blocks.delete(block_id=result["id"])
-        except Exception as e:
-            print(f"删除块时出错: {e}")
 
 
 @retry(stop_max_attempt_number=3, wait_fixed=5000)
@@ -297,7 +295,6 @@ def insert_to_notion(bookName, bookId, cover, sort, author, isbn, rating, catego
         "ISBN": isbn,
         "链接": f"https://weread.qq.com/web/reader/{calculate_book_str_id(bookId)}",
         "作者": author,
-        "Sort": sort,
         "评分": rating,
     }
     if categories != None:
@@ -338,13 +335,15 @@ def insert_to_notion(bookName, bookId, cover, sort, author, isbn, rating, catego
 
 def add_children(id, children):
     results = []
-    for i in range(0, len(children) // 100 + 1):
+    for i in range(0, len(children), 100):
         time.sleep(0.3)
         response = client.blocks.children.append(
-            block_id=id, children=children[i * 100 : (i + 1) * 100]
+            block_id=id, children=children[i : i + 100]
         )
-        results.extend(response.get("results"))
-    return results if len(results) == len(children) else None
+        results.extend(response.get("results") or [])
+    if len(results) != len(children):
+        raise RuntimeError("Not all book note blocks were saved; will retry this book")
+    return results
 
 
 def add_grandchild(grandchild, results):
@@ -814,7 +813,6 @@ def sync():
             if categories != None:
                 categories = [x["title"] for x in categories]
             print(f"正在同步 {title} ,一共{len(books)}本，当前是第{index+1}本。")
-            check(bookId)
             if has_any_property(("ISBN", "评分")):
                 isbn, rating = get_bookinfo(bookId)
             else:
@@ -832,8 +830,12 @@ def sync():
             )
             children, grandchild = get_children(chapter, summary, bookmark_list)
             results = add_children(id, children)
-            if len(grandchild) > 0 and results != None:
+            if grandchild:
                 add_grandchild(grandchild, results)
+            # Only delete previous copies after the new page is complete.
+            check(bookId, keep_id=id)
+            # Sort is the sync cursor; publish it only after a complete import.
+            client.pages.update(page_id=id, properties={"Sort": get_number(sort)})
 
 
 def main(argv=None):
