@@ -35,7 +35,7 @@ weread = None
 load_dotenv()
 WEREAD_URL = "https://weread.qq.com/"
 WEREAD_GATEWAY_URL = "https://i.weread.qq.com/api/agent/gateway"
-WEREAD_SKILL_VERSION = "1.0.5"
+WEREAD_SKILL_VERSION = "1.0.6"
 NOTION_VERSION = "2026-03-11"
 BOOKMARK_CALLOUT_ICON = "〰️"
 NOTE_CALLOUT_ICON = "✍️"
@@ -154,8 +154,14 @@ class WeReadGatewayClient:
         response = self.session.post(WEREAD_GATEWAY_URL, json=payload, timeout=30)
         response.raise_for_status()
         data = response.json()
-        if data.get("upgrade_info"):
-            raise Exception(f"微信读书 skill 需要升级: {data.get('upgrade_info')}")
+        upgrade_info = data.get("upgrade_info")
+        if upgrade_info:
+            # The gateway may include an upgrade reminder on a successful response.
+            # Do not discard the returned data when the request was processed.
+            message = str(upgrade_info.get("message", "")) if isinstance(upgrade_info, dict) else ""
+            if data.get("errcode", 0) != 0 or "本次请求已正常处理" not in message:
+                raise Exception(f"微信读书 skill 需要升级: {upgrade_info}")
+            print(f"微信读书 skill 升级提醒（当前请求已成功）: {message}")
         if data.get("errcode", 0) != 0:
             raise Exception(f"微信读书 Gateway 请求失败: {api_name}, errcode={data.get('errcode')}, response={data}")
         return data
